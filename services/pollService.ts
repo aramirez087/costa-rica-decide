@@ -61,20 +61,24 @@ export const submitVote = async (candidateId: string): Promise<VoteResult> => {
     const visitorId = await getVoterIdentifier();
     const fingerprint = await generateFingerprint();
 
+    const payload = {
+      candidateId,
+      visitorId,
+      fingerprint,
+      // Send additional verification data
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      language: navigator.language,
+      screenRes: `${screen.width}x${screen.height}`,
+    };
+
+    console.log('Sending vote payload:', payload);
+
     const response = await fetch('/api/vote', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        candidateId,
-        visitorId,
-        fingerprint,
-        // Send additional verification data
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        language: navigator.language,
-        screenRes: `${screen.width}x${screen.height}`,
-      }),
+      body: JSON.stringify(payload),
     });
 
     const data = await response.json();

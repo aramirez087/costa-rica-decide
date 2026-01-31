@@ -59,7 +59,21 @@ export default async function handler(req: any, res: any) {
             contentType: req.headers['content-type']
         });
 
-        const { candidateId, visitorId, fingerprint, timezone, screenRes } = req.body;
+        // Parse body if it's a string (Vercel sometimes doesn't auto-parse)
+        let parsedBody = req.body;
+        if (typeof req.body === 'string') {
+            try {
+                parsedBody = JSON.parse(req.body);
+                console.log('Parsed string body:', parsedBody);
+            } catch (e) {
+                console.error('Failed to parse body as JSON:', e);
+                return res.status(400).json({ error: 'Invalid JSON body' });
+            }
+        }
+
+
+
+        const { candidateId, visitorId, fingerprint, timezone, screenRes } = parsedBody || {};
 
         // Validate candidate
         if (!candidateId || !VALID_OPTIONS.includes(candidateId)) {
