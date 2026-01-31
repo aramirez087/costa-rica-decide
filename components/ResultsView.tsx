@@ -107,12 +107,17 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ data }) => {
 
   const chartData = useMemo(() => {
     return data.results.map(r => {
+      // Look up in candidates first, then special options
       const candidate = CANDIDATES.find(c => c.id === r.candidateId);
+      const special = SPECIAL_OPTIONS.find(s => s.id === r.candidateId);
+      const option = candidate || special;
+
       return {
-        name: candidate?.name || 'Desconocido',
+        name: option?.name || 'Desconocido',
         votes: r.votes,
         percentage: data.totalVotes > 0 ? ((r.votes / data.totalVotes) * 100).toFixed(1) : '0',
-        imageUrl: candidate?.imageUrl
+        imageUrl: option?.imageUrl || '',
+        isSpecial: !!special
       };
     });
   }, [data]);
