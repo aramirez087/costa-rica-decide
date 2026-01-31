@@ -1,18 +1,33 @@
 import { PollData } from '../types';
 import { STORAGE_KEY_VOTED } from '../constants';
+import {
+  getVoterIdentifier,
+  markAsVoted,
+  hasVotedLocally,
+  checkIndexedDB,
+  generateFingerprint
+} from './voteProtection';
 
-// Generate a simple visitor ID for vote deduplication
-const getVisitorId = (): string => {
-  let visitorId = localStorage.getItem('visitor_id');
-  if (!visitorId) {
-    visitorId = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
-    localStorage.setItem('visitor_id', visitorId);
-  }
-  return visitorId;
+// Check all local storage methods for vote record
+export const hasUserVoted = async (): Promise<boolean> => {
+  // Check basic localStorage
+  if (localStorage.getItem(STORAGE_KEY_VOTED)) return true;
+
+  // Check our multi-storage protection
+  if (hasVotedLocally()) return true;
+
+  // Check IndexedDB (async)
+  const inIndexedDB = await checkIndexedDB();
+  if (inIndexedDB) return true;
+
+  return false;
 };
 
-export const hasUserVoted = (): boolean => {
-  return !!localStorage.getItem(STORAGE_KEY_VOTED);
+// Synchronous version for initial render (best effort)
+export const hasUserVotedSync = (): boolean => {
+  if (localStorage.getItem(STORAGE_KEY_VOTED)) return true;
+  if (hasVotedLocally()) return true;
+  return false;
 };
 
 export const getPollResults = async (): Promise<PollData> => {
@@ -30,11 +45,17 @@ export const getPollResults = async (): Promise<PollData> => {
 };
 
 export const submitVote = async (candidateId: string): Promise<boolean> => {
-  if (hasUserVoted()) {
+  // Check locally first (fast check)
+  if (hasVotedLocally()) {
+    console.warn('Already voted (local check)');
     return false;
   }
 
   try {
+    // Generate voter identifier with fingerprint
+    const visitorId = await getVoterIdentifier();
+    const fingerprint = await generateFingerprint();
+
     const response = await fetch('/api/vote', {
       method: 'POST',
       headers: {
@@ -42,7 +63,12 @@ export const submitVote = async (candidateId: string): Promise<boolean> => {
       },
       body: JSON.stringify({
         candidateId,
-        visitorId: getVisitorId(),
+        visitorId,
+        fingerprint,
+        // Send additional verification data
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        language: navigator.language,
+        screenRes: `${screen.width}x${screen.height}`,
       }),
     });
 
@@ -51,11 +77,14 @@ export const submitVote = async (candidateId: string): Promise<boolean> => {
     if (data.alreadyVoted) {
       // Server says already voted, mark locally too
       localStorage.setItem(STORAGE_KEY_VOTED, 'true');
+      markAsVoted(candidateId);
       return false;
     }
 
     if (data.success) {
+      // Mark as voted in all storage mechanisms
       localStorage.setItem(STORAGE_KEY_VOTED, 'true');
+      markAsVoted(candidateId);
       return true;
     }
 

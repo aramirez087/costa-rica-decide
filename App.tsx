@@ -3,7 +3,7 @@ import { Vote, Loader2, BarChart2, ShieldCheck, Info, Ban, HelpCircle } from 'lu
 import { CANDIDATES, SPECIAL_OPTIONS } from './constants';
 import { CandidateCard } from './components/CandidateCard';
 import { ResultsView } from './components/ResultsView';
-import { hasUserVoted, submitVote, getPollResults } from './services/pollService';
+import { hasUserVoted, hasUserVotedSync, submitVote, getPollResults } from './services/pollService';
 import { PollData } from './types';
 
 function App() {
@@ -15,8 +15,11 @@ function App() {
 
   useEffect(() => {
     const init = async () => {
-      const voted = hasUserVoted();
-      if (voted) {
+      // Check both sync (fast) and async (thorough) methods
+      const votedSync = hasUserVotedSync();
+      const votedAsync = await hasUserVoted();
+
+      if (votedSync || votedAsync) {
         const data = await getPollResults();
         setPollData(data);
         setView('results');
