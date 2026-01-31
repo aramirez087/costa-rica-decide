@@ -52,12 +52,25 @@ export default async function handler(req: any, res: any) {
     }
 
     try {
+        // Log incoming request for debugging
+        console.log('Vote request received:', {
+            body: req.body,
+            bodyType: typeof req.body,
+            contentType: req.headers['content-type']
+        });
+
         const { candidateId, visitorId, fingerprint, timezone, screenRes } = req.body;
 
         // Validate candidate
         if (!candidateId || !VALID_OPTIONS.includes(candidateId)) {
-            return res.status(400).json({ error: 'Invalid candidate' });
+            console.log('Invalid candidate:', { received: candidateId, valid: VALID_OPTIONS });
+            return res.status(400).json({
+                error: 'Invalid candidate',
+                received: candidateId || null,
+                valid: VALID_OPTIONS
+            });
         }
+
 
         // Get IP address
         const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim()

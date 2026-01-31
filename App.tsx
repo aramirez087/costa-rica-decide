@@ -13,6 +13,8 @@ function App() {
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
   const [pollData, setPollData] = useState<PollData | null>(null);
 
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
   useEffect(() => {
     const init = async () => {
       // Check both sync (fast) and async (thorough) methods
@@ -33,15 +35,28 @@ function App() {
     if (!selectedCandidateId) return;
 
     setSubmitting(true);
+    setErrorMessage(null);
     try {
-      const success = await submitVote(selectedCandidateId);
-      if (success) {
+      const result = await submitVote(selectedCandidateId);
+      if (result.success) {
         const data = await getPollResults();
         setPollData(data);
         setView('results');
+      } else {
+        // Show error message to user
+        setErrorMessage(result.error || 'Error al enviar el voto.');
+        // If already voted, redirect to results after a short delay
+        if (result.error?.includes('Ya has votado')) {
+          setTimeout(async () => {
+            const data = await getPollResults();
+            setPollData(data);
+            setView('results');
+          }, 2000);
+        }
       }
     } catch (error) {
       console.error("Error submitting vote", error);
+      setErrorMessage('Error de conexión. Intenta de nuevo.');
     } finally {
       setSubmitting(false);
     }
@@ -151,6 +166,13 @@ function App() {
                 </button>
               </div>
             </div>
+
+            {/* Error Message Toast */}
+            {errorMessage && (
+              <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-center animate-in slide-in-from-top-2 duration-300">
+                <p className="font-medium">{errorMessage}</p>
+              </div>
+            )}
 
             <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-200 sm:relative sm:bg-transparent sm:border-0 sm:p-0 flex justify-center z-40">
               <button

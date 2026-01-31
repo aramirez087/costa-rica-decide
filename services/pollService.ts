@@ -44,11 +44,16 @@ export const getPollResults = async (): Promise<PollData> => {
   }
 };
 
-export const submitVote = async (candidateId: string): Promise<boolean> => {
+export interface VoteResult {
+  success: boolean;
+  error?: string;
+}
+
+export const submitVote = async (candidateId: string): Promise<VoteResult> => {
   // Check locally first (fast check)
   if (hasVotedLocally()) {
     console.warn('Already voted (local check)');
-    return false;
+    return { success: false, error: 'Ya has votado anteriormente.' };
   }
 
   try {
@@ -78,19 +83,21 @@ export const submitVote = async (candidateId: string): Promise<boolean> => {
       // Server says already voted, mark locally too
       localStorage.setItem(STORAGE_KEY_VOTED, 'true');
       markAsVoted(candidateId);
-      return false;
+      return { success: false, error: data.error || 'Ya has votado anteriormente.' };
     }
 
     if (data.success) {
       // Mark as voted in all storage mechanisms
       localStorage.setItem(STORAGE_KEY_VOTED, 'true');
       markAsVoted(candidateId);
-      return true;
+      return { success: true };
     }
 
-    return false;
+    // Handle other errors (e.g., invalid candidate)
+    return { success: false, error: data.error || 'Error al enviar el voto.' };
   } catch (error) {
     console.error('Error submitting vote:', error);
-    return false;
+    return { success: false, error: 'Error de conexión. Intenta de nuevo.' };
   }
 };
+
