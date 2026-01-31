@@ -4,28 +4,25 @@ import { Redis } from '@upstash/redis';
 
 // Debug logging
 console.log('ENV CHECK - UPSTASH_REDIS_REST_URL:', process.env.UPSTASH_REDIS_REST_URL ? 'SET' : 'NOT SET');
-console.log('ENV CHECK - UPSTASH_REDIS_REST_TOKEN:', process.env.UPSTASH_REDIS_REST_TOKEN ? 'SET' : 'NOT SET');
 
-// Initialize Redis with explicit fallback for debugging
+// Initialize Redis
 const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
 const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
 
 let redis: Redis | null = null;
 
 if (redisUrl && redisToken) {
-    console.log('Initializing Redis with URL:', redisUrl.substring(0, 30) + '...');
+    console.log('Initializing Redis...');
     redis = new Redis({
         url: redisUrl,
         token: redisToken,
     });
-} else {
-    console.error('Missing Redis credentials!');
 }
 
-// All valid voting options: candidates + special options
+// All valid voting options
 const VALID_OPTIONS = ['lf', 'ar', 'cd', 'nd', 'arr', 'fa', 'jch', 'jab', 'nulo', 'indeciso'];
 
-// Simple hash function for server-side fingerprinting
+// Simple hash function
 const simpleHash = (str: string): string => {
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
@@ -51,96 +48,106 @@ export default async function handler(req: any, res: any) {
     }
 
     if (!redis) {
-        console.error('Redis not initialized - missing environment variables');
-        return res.status(500).json({
-            error: 'Database not configured',
-            debug: {
-                url: process.env.UPSTASH_REDIS_REST_URL ? 'present' : 'missing',
-                token: process.env.UPSTASH_REDIS_REST_TOKEN ? 'present' : 'missing'
-            }
-        });
+        return res.status(500).json({ error: 'Database not configured' });
     }
 
     try {
-        const { candidateId, visitorId, fingerprint, timezone, language, screenRes } = req.body;
+        const { candidateId, visitorId, fingerprint, timezone, screenRes } = req.body;
 
         // Validate candidate
         if (!candidateId || !VALID_OPTIONS.includes(candidateId)) {
             return res.status(400).json({ error: 'Invalid candidate' });
         }
 
-        // Get IP address (handle various proxy headers)
+        // Get IP address
         const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim()
             || req.headers['x-real-ip']
             || req.connection?.remoteAddress
             || 'unknown';
 
-        // Get User-Agent
         const userAgent = req.headers['user-agent'] || 'unknown';
 
-        // Generate multiple fingerprints for deduplication
+        // ==========================================
+        // STRICT RATE LIMITING - 1 vote per IP per day
+        // ==========================================
+        const ipKey = `ip:${simpleHash(ip)}`;
+        const ipVoted = await redis.get(ipKey);
+
+        if (ipVoted) {
+            console.log(`IP already voted: ${ip}`);
+            return res.status(400).json({
+                error: 'Ya has votado desde esta conexión',
+                alreadyVoted: true
+            });
+        }
+
+        // ==========================================
+        // FINGERPRINT-BASED DEDUPLICATION
+        // ==========================================
         const identifiers = [
-            // 1. Client-provided fingerprint (if available)
             fingerprint ? `fp:${fingerprint.substring(0, 32)}` : null,
-
-            // 2. Client-provided visitor ID
             visitorId ? `vid:${visitorId.substring(0, 40)}` : null,
+            `ua:${simpleHash(userAgent)}`,
+            screenRes && timezone ? `dev:${simpleHash(screenRes + timezone)}` : null,
+        ].filter(Boolean) as string[];
 
-            // 3. IP + User-Agent hash
-            `ip-ua:${simpleHash(ip + userAgent)}`,
-
-            // 4. IP + Screen resolution + Timezone (catches same device)
-            screenRes && timezone ? `device:${simpleHash(ip + screenRes + timezone)}` : null,
-
-            // 5. IP only (last resort, catches multiple accounts same network)
-            `ip:${simpleHash(ip)}`,
-        ].filter(Boolean);
-
-        console.log('Vote attempt identifiers:', identifiers);
-
-        // Check if ANY of the identifiers has already voted
-        for (const identifier of identifiers) {
-            const hasVoted = await redis.sismember('voters', identifier);
-            if (hasVoted) {
-                console.log(`Already voted with identifier: ${identifier}`);
+        // Check if any identifier already voted
+        for (const id of identifiers) {
+            const voted = await redis.sismember('voters', id);
+            if (voted) {
+                console.log(`Already voted with: ${id}`);
                 return res.status(400).json({
-                    error: 'Already voted',
-                    alreadyVoted: true,
-                    reason: 'duplicate_detected'
+                    error: 'Ya has votado',
+                    alreadyVoted: true
                 });
             }
         }
 
-        // Rate limiting: Check if this IP has voted too many times recently
-        const ipVoteKey = `rate:${simpleHash(ip)}`;
-        const recentVotes = await redis.get(ipVoteKey);
-        if (recentVotes && Number(recentVotes) >= 3) {
-            console.log(`Rate limit exceeded for IP: ${ip}`);
+        // ==========================================
+        // GLOBAL RATE LIMIT - Max 10 votes per minute total
+        // ==========================================
+        const globalKey = 'global:votes:minute';
+        const globalVotes = await redis.get(globalKey);
+
+        if (globalVotes && Number(globalVotes) >= 10) {
+            console.log('Global rate limit exceeded');
             return res.status(429).json({
-                error: 'Too many vote attempts',
-                alreadyVoted: true,
-                reason: 'rate_limited'
+                error: 'Demasiados votos, intenta en un minuto',
+                alreadyVoted: false
             });
         }
 
-        // Record vote atomically
+        // ==========================================
+        // RECORD THE VOTE
+        // ==========================================
         const pipeline = redis.pipeline();
 
         // Increment vote count
         pipeline.incr(`votes:${candidateId}`);
 
-        // Add ALL identifiers to voters set (prevents any of them from voting again)
-        for (const identifier of identifiers) {
-            pipeline.sadd('voters', identifier!);
+        // Mark IP as voted (expires in 24 hours)
+        pipeline.set(ipKey, '1', { ex: 86400 });
+
+        // Add all identifiers to voters set
+        for (const id of identifiers) {
+            pipeline.sadd('voters', id);
         }
 
-        // Increment rate limit counter with 1-hour expiry
-        pipeline.incr(ipVoteKey);
-        pipeline.expire(ipVoteKey, 3600);
+        // Increment global rate limit (expires in 60 seconds)
+        pipeline.incr(globalKey);
+        pipeline.expire(globalKey, 60);
+
+        // Log vote with timestamp
+        pipeline.lpush('vote_log', JSON.stringify({
+            candidateId,
+            ip: simpleHash(ip),
+            timestamp: Date.now()
+        }));
+        pipeline.ltrim('vote_log', 0, 999); // Keep last 1000 votes
 
         await pipeline.exec();
 
-        console.log('Vote recorded successfully for candidate:', candidateId);
+        console.log('Vote recorded for:', candidateId);
         return res.status(200).json({ success: true });
 
     } catch (error) {
