@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Vote, Loader2, BarChart2, ShieldCheck, Info, Ban, HelpCircle } from 'lucide-react';
+import { Analytics } from '@vercel/analytics/react';
 import { CANDIDATES, SPECIAL_OPTIONS } from './constants';
 import { CandidateCard } from './components/CandidateCard';
 import { ResultsView } from './components/ResultsView';
@@ -224,6 +225,7 @@ function App() {
         <p className="mb-2">© 2026 Costa Rica Decide. Proyecto independiente de demostración.</p>
         <p className="text-xs text-gray-300">Esta es una encuesta de opinión, no un proceso electoral oficial.</p>
       </footer>
+      <Analytics />
     </div>
   );
 }
