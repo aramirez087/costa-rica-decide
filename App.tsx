@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Vote, Loader2, BarChart2, ShieldCheck, Info } from 'lucide-react';
-import { CANDIDATES } from './constants';
+import { Vote, Loader2, BarChart2, ShieldCheck, Info, Ban, HelpCircle } from 'lucide-react';
+import { CANDIDATES, SPECIAL_OPTIONS } from './constants';
 import { CandidateCard } from './components/CandidateCard';
 import { ResultsView } from './components/ResultsView';
 import { hasUserVoted, submitVote, getPollResults } from './services/pollService';
@@ -102,7 +102,7 @@ function App() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-10">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
               {CANDIDATES.map((candidate) => (
                 <CandidateCard
                   key={candidate.id}
@@ -111,6 +111,42 @@ function App() {
                   onSelect={setSelectedCandidateId}
                 />
               ))}
+            </div>
+
+            {/* Special Options */}
+            <div className="border-t border-gray-200 pt-6 mb-10">
+              <p className="text-sm text-gray-500 text-center mb-4">Otras opciones</p>
+              <div className="grid grid-cols-2 gap-3">
+                {/* Voto Nulo */}
+                <button
+                  onClick={() => setSelectedCandidateId('nulo')}
+                  className={`
+                    flex items-center justify-center gap-2 p-4 rounded-xl border-2 transition-all duration-300
+                    ${selectedCandidateId === 'nulo'
+                      ? 'border-red-500 bg-red-50 text-red-700 shadow-lg'
+                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                    }
+                  `}
+                >
+                  <Ban size={20} />
+                  <span className="font-medium">Voto Nulo</span>
+                </button>
+
+                {/* Indeciso */}
+                <button
+                  onClick={() => setSelectedCandidateId('indeciso')}
+                  className={`
+                    flex items-center justify-center gap-2 p-4 rounded-xl border-2 transition-all duration-300
+                    ${selectedCandidateId === 'indeciso'
+                      ? 'border-amber-500 bg-amber-50 text-amber-700 shadow-lg'
+                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                    }
+                  `}
+                >
+                  <HelpCircle size={20} />
+                  <span className="font-medium">Indeciso</span>
+                </button>
+              </div>
             </div>
 
             <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-200 sm:relative sm:bg-transparent sm:border-0 sm:p-0 flex justify-center z-40">

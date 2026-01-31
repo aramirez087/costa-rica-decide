@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell } from 'recharts';
 import { Share2, MessageCircle } from 'lucide-react';
 import { PollData } from '../types';
-import { CANDIDATES } from '../constants';
+import { CANDIDATES, SPECIAL_OPTIONS, ALL_OPTIONS } from '../constants';
 
 interface ResultsViewProps {
   data: PollData;

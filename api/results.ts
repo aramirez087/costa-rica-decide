@@ -1,11 +1,18 @@
 import { Redis } from '@upstash/redis';
 
-const redis = new Redis({
-    url: process.env.UPSTASH_REDIS_REST_URL!,
-    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-});
+// Debug logging
+console.log('UPSTASH_REDIS_REST_URL:', process.env.UPSTASH_REDIS_REST_URL ? 'SET' : 'NOT SET');
+console.log('UPSTASH_REDIS_REST_TOKEN:', process.env.UPSTASH_REDIS_REST_TOKEN ? 'SET' : 'NOT SET');
 
-const CANDIDATES = ['lf', 'ar', 'cd', 'arr', 'fa', 'jch', 'jab'];
+const redis = process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+    ? new Redis({
+        url: process.env.UPSTASH_REDIS_REST_URL,
+        token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    })
+    : null;
+
+// All voting options: candidates + special options
+const ALL_OPTIONS = ['lf', 'ar', 'cd', 'nd', 'arr', 'fa', 'jch', 'jab', 'nulo', 'indeciso'];
 
 export default async function handler(req: any, res: any) {
     // Enable CORS
@@ -21,15 +28,26 @@ export default async function handler(req: any, res: any) {
         return res.status(405).json({ error: 'Method not allowed' });
     }
 
+    if (!redis) {
+        console.error('Redis not initialized - missing environment variables');
+        return res.status(500).json({
+            error: 'Database not configured',
+            debug: {
+                url: process.env.UPSTASH_REDIS_REST_URL ? 'present' : 'missing',
+                token: process.env.UPSTASH_REDIS_REST_TOKEN ? 'present' : 'missing'
+            }
+        });
+    }
+
     try {
         // Get all vote counts using pipeline for efficiency
         const pipeline = redis.pipeline();
-        for (const id of CANDIDATES) {
+        for (const id of ALL_OPTIONS) {
             pipeline.get(`votes:${id}`);
         }
         const voteCounts = await pipeline.exec();
 
-        const results = CANDIDATES.map((id, index) => ({
+        const results = ALL_OPTIONS.map((id, index) => ({
             candidateId: id,
             votes: Number(voteCounts[index]) || 0,
         }));

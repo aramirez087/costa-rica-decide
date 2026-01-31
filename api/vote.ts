@@ -15,7 +15,8 @@ const redis = process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_RE
     })
     : null;
 
-const VALID_CANDIDATES = ['lf', 'ar', 'cd', 'arr', 'fa', 'jch', 'jab'];
+// All valid voting options: candidates + special options
+const VALID_OPTIONS = ['lf', 'ar', 'cd', 'nd', 'arr', 'fa', 'jch', 'jab', 'nulo', 'indeciso'];
 
 export default async function handler(req: any, res: any) {
     // Enable CORS
@@ -46,7 +47,7 @@ export default async function handler(req: any, res: any) {
         const { candidateId, visitorId } = req.body;
 
         // Validate candidate
-        if (!candidateId || !VALID_CANDIDATES.includes(candidateId)) {
+        if (!candidateId || !VALID_OPTIONS.includes(candidateId)) {
             return res.status(400).json({ error: 'Invalid candidate' });
         }
 
