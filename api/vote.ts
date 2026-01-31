@@ -115,12 +115,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const userAgent = req.headers['user-agent'] || 'unknown';
 
         // ==========================================
+        // TEST MODE - Bypass duplicate checks for testing
+        // ==========================================
+        const testSecret = process.env.TEST_MODE_SECRET || 'cr-decide-test-2026';
+        const isTestMode = req.query?.testMode === testSecret;
+
+        if (isTestMode) {
+            console.log('⚠️ TEST MODE ENABLED - Bypassing duplicate checks');
+        }
+
+        // ==========================================
         // STRICT RATE LIMITING - 1 vote per IP per day
         // ==========================================
         const ipKey = `ip:${simpleHash(ip)}`;
         const ipVoted = await redis.get(ipKey);
 
-        if (ipVoted) {
+        if (ipVoted && !isTestMode) {
             console.log(`IP already voted: ${ip}`);
             return res.status(400).json({
                 error: 'Ya has votado desde esta conexión',
@@ -141,7 +151,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Check if any identifier already voted
         for (const id of identifiers) {
             const voted = await redis.sismember('voters', id);
-            if (voted) {
+            if (voted && !isTestMode) {
                 console.log(`Already voted with: ${id}`);
                 return res.status(400).json({
                     error: 'Ya has votado',
@@ -192,7 +202,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }));
         pipeline.ltrim('vote_log', 0, 999); // Keep last 1000 votes
 
-        await pipeline.exec();
+        const results = await pipeline.exec();
+        console.log('Redis pipeline results:', JSON.stringify(results));
 
         console.log('Vote recorded for:', candidateId);
         return res.status(200).json({ success: true });

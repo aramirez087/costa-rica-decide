@@ -50,8 +50,13 @@ export interface VoteResult {
 }
 
 export const submitVote = async (candidateId: string): Promise<VoteResult> => {
-  // Check locally first (fast check)
-  if (hasVotedLocally()) {
+  // Check for test mode in URL
+  const urlParams = new URLSearchParams(window.location.search);
+  const testMode = urlParams.get('testMode');
+  const isTestMode = !!testMode;
+
+  // Check locally first (fast check) - skip in test mode
+  if (!isTestMode && hasVotedLocally()) {
     console.warn('Already voted (local check)');
     return { success: false, error: 'Ya has votado anteriormente.' };
   }
@@ -72,8 +77,14 @@ export const submitVote = async (candidateId: string): Promise<VoteResult> => {
     };
 
     console.log('Sending vote payload:', payload);
+    if (isTestMode) {
+      console.log('⚠️ TEST MODE - Sending with testMode param');
+    }
 
-    const response = await fetch('/api/vote', {
+    // Build URL with testMode if present
+    const apiUrl = testMode ? `/api/vote?testMode=${testMode}` : '/api/vote';
+
+    const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -84,16 +95,20 @@ export const submitVote = async (candidateId: string): Promise<VoteResult> => {
     const data = await response.json();
 
     if (data.alreadyVoted) {
-      // Server says already voted, mark locally too
-      localStorage.setItem(STORAGE_KEY_VOTED, 'true');
-      markAsVoted(candidateId);
+      // Server says already voted, mark locally too (unless in test mode)
+      if (!isTestMode) {
+        localStorage.setItem(STORAGE_KEY_VOTED, 'true');
+        markAsVoted(candidateId);
+      }
       return { success: false, error: data.error || 'Ya has votado anteriormente.' };
     }
 
     if (data.success) {
-      // Mark as voted in all storage mechanisms
-      localStorage.setItem(STORAGE_KEY_VOTED, 'true');
-      markAsVoted(candidateId);
+      // Mark as voted in all storage mechanisms (unless in test mode)
+      if (!isTestMode) {
+        localStorage.setItem(STORAGE_KEY_VOTED, 'true');
+        markAsVoted(candidateId);
+      }
       return { success: true };
     }
 
