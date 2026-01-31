@@ -1,6 +1,7 @@
 // Load environment variables for local development
 import 'dotenv/config';
 import { Redis } from '@upstash/redis';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 // Debug logging
 console.log('ENV CHECK - UPSTASH_REDIS_REST_URL:', process.env.UPSTASH_REDIS_REST_URL ? 'SET' : 'NOT SET');
@@ -33,7 +34,36 @@ const simpleHash = (str: string): string => {
     return Math.abs(hash).toString(36);
 };
 
-export default async function handler(req: any, res: any) {
+// Helper to read body from request stream
+async function readBody(req: VercelRequest): Promise<any> {
+    // If body is already parsed, return it
+    if (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0) {
+        return req.body;
+    }
+
+    // Try to read from the stream
+    return new Promise((resolve, reject) => {
+        let data = '';
+        req.on('data', (chunk: Buffer) => {
+            data += chunk.toString();
+        });
+        req.on('end', () => {
+            if (!data) {
+                resolve({});
+                return;
+            }
+            try {
+                resolve(JSON.parse(data));
+            } catch (e) {
+                console.error('Failed to parse body:', data);
+                reject(new Error('Invalid JSON'));
+            }
+        });
+        req.on('error', reject);
+    });
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Enable CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -52,26 +82,15 @@ export default async function handler(req: any, res: any) {
     }
 
     try {
+        // Read body from request stream (Vercel may not auto-parse)
+        const parsedBody = await readBody(req);
+
         // Log incoming request for debugging
         console.log('Vote request received:', {
-            body: req.body,
-            bodyType: typeof req.body,
+            body: parsedBody,
+            bodyType: typeof parsedBody,
             contentType: req.headers['content-type']
         });
-
-        // Parse body if it's a string (Vercel sometimes doesn't auto-parse)
-        let parsedBody = req.body;
-        if (typeof req.body === 'string') {
-            try {
-                parsedBody = JSON.parse(req.body);
-                console.log('Parsed string body:', parsedBody);
-            } catch (e) {
-                console.error('Failed to parse body as JSON:', e);
-                return res.status(400).json({ error: 'Invalid JSON body' });
-            }
-        }
-
-
 
         const { candidateId, visitorId, fingerprint, timezone, screenRes } = parsedBody || {};
 
@@ -87,9 +106,10 @@ export default async function handler(req: any, res: any) {
 
 
         // Get IP address
-        const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim()
-            || req.headers['x-real-ip']
-            || req.connection?.remoteAddress
+        const forwardedFor = req.headers['x-forwarded-for'];
+        const forwardedForStr = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
+        const ip = forwardedForStr?.split(',')[0]?.trim()
+            || req.headers['x-real-ip'] as string
             || 'unknown';
 
         const userAgent = req.headers['user-agent'] || 'unknown';
