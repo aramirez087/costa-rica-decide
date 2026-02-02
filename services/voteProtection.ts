@@ -157,6 +157,35 @@ export const hasVotedLocally = (): boolean => {
     return false;
 };
 
+// Get the stored vote data
+export const getStoredVote = (): { voted: boolean; candidateId: string; timestamp: number } | null => {
+    const VOTED_KEY = 'cr_decide_voted';
+
+    // Try localStorage
+    const local = localStorage.getItem(VOTED_KEY);
+    if (local) {
+        try { return JSON.parse(local); } catch (e) { /* ignore */ }
+    }
+
+    // Try sessionStorage
+    const session = sessionStorage.getItem(VOTED_KEY);
+    if (session) {
+        try { return JSON.parse(session); } catch (e) { /* ignore */ }
+    }
+
+    // Try cookie
+    const cookies = document.cookie.split(';');
+    const voteCookie = cookies.find(c => c.trim().startsWith(VOTED_KEY + '='));
+    if (voteCookie) {
+        try {
+            const data = decodeURIComponent(voteCookie.split('=')[1]);
+            return JSON.parse(data);
+        } catch (e) { /* ignore */ }
+    }
+
+    return null;
+};
+
 // Store data in IndexedDB for persistence
 const storeInIndexedDB = async (key: string, value: string): Promise<void> => {
     try {

@@ -5,7 +5,8 @@ import {
   markAsVoted,
   hasVotedLocally,
   checkIndexedDB,
-  generateFingerprint
+  generateFingerprint,
+  getStoredVote
 } from './voteProtection';
 
 // Check all local storage methods for vote record
@@ -30,6 +31,12 @@ export const hasUserVotedSync = (): boolean => {
   return false;
 };
 
+// Get the candidate the user currently voted for
+export const getCurrentVote = (): string | null => {
+  const vote = getStoredVote();
+  return vote ? vote.candidateId : null;
+};
+
 export const getPollResults = async (): Promise<PollData> => {
   try {
     const response = await fetch('/api/results');
@@ -46,6 +53,7 @@ export const getPollResults = async (): Promise<PollData> => {
 
 export interface VoteResult {
   success: boolean;
+  updated?: boolean;
   error?: string;
 }
 
@@ -54,12 +62,6 @@ export const submitVote = async (candidateId: string): Promise<VoteResult> => {
   const urlParams = new URLSearchParams(window.location.search);
   const testMode = urlParams.get('testMode');
   const isTestMode = !!testMode;
-
-  // Check locally first (fast check) - skip in test mode
-  if (!isTestMode && hasVotedLocally()) {
-    console.warn('Already voted (local check)');
-    return { success: false, error: 'Ya has votado anteriormente.' };
-  }
 
   try {
     // Generate voter identifier with fingerprint
@@ -109,7 +111,7 @@ export const submitVote = async (candidateId: string): Promise<VoteResult> => {
         localStorage.setItem(STORAGE_KEY_VOTED, 'true');
         markAsVoted(candidateId);
       }
-      return { success: true };
+      return { success: true, updated: data.updated };
     }
 
     // Handle other errors (e.g., invalid candidate)

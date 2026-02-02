@@ -4,7 +4,7 @@ import { Analytics } from '@vercel/analytics/react';
 import { CANDIDATES, SPECIAL_OPTIONS } from './constants';
 import { CandidateCard } from './components/CandidateCard';
 import { ResultsView } from './components/ResultsView';
-import { hasUserVoted, hasUserVotedSync, submitVote, getPollResults } from './services/pollService';
+import { hasUserVoted, hasUserVotedSync, submitVote, getPollResults, getCurrentVote } from './services/pollService';
 import { PollData } from './types';
 
 function App() {
@@ -13,7 +13,7 @@ function App() {
   const [view, setView] = useState<'voting' | 'results'>('voting');
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
   const [pollData, setPollData] = useState<PollData | null>(null);
-
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -26,6 +26,12 @@ function App() {
         const data = await getPollResults();
         setPollData(data);
         setView('results');
+
+        // Pre-select the current vote
+        const currentVote = getCurrentVote();
+        if (currentVote) {
+          setSelectedCandidateId(currentVote);
+        }
       }
       setLoading(false);
     };
@@ -37,12 +43,19 @@ function App() {
 
     setSubmitting(true);
     setErrorMessage(null);
+    setSuccessMessage(null);
     try {
       const result = await submitVote(selectedCandidateId);
       if (result.success) {
+        setSuccessMessage(result.updated ? '¡Tu voto ha sido actualizado!' : '¡Voto registrado con éxito!');
         const data = await getPollResults();
         setPollData(data);
-        setView('results');
+
+        // Show success message for 2 seconds then go to results
+        setTimeout(() => {
+          setView('results');
+          setSuccessMessage(null);
+        }, 2000);
       } else {
         // Show error message to user
         setErrorMessage(result.error || 'Error al enviar el voto.');
@@ -69,6 +82,10 @@ function App() {
     setPollData(data);
     setLoading(false);
     setView('results');
+  };
+
+  const handleChangeVote = () => {
+    setView('voting');
   };
 
   if (loading) {
@@ -175,6 +192,13 @@ function App() {
               </div>
             )}
 
+            {/* Success Message Toast */}
+            {successMessage && (
+              <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-xl text-green-700 text-center animate-in slide-in-from-top-2 duration-300">
+                <p className="font-medium">{successMessage}</p>
+              </div>
+            )}
+
             <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-200 sm:relative sm:bg-transparent sm:border-0 sm:p-0 flex justify-center z-40">
               <button
                 onClick={handleVote}
@@ -208,7 +232,15 @@ function App() {
               {pollData ? <ResultsView data={pollData} /> : <div className="text-center">Cargando datos...</div>}
             </div>
 
-            <div className="mt-8 text-center">
+            <div className="mt-8 flex flex-col items-center gap-4">
+              <button
+                onClick={handleChangeVote}
+                className="flex items-center gap-2 px-6 py-2 bg-blue-50 text-blue-700 rounded-full font-medium hover:bg-blue-100 transition-all border border-blue-100"
+              >
+                <Vote size={18} />
+                <span>¿Cambiaste de opinión? Cambiar mi voto</span>
+              </button>
+
               <button
                 onClick={() => window.location.reload()}
                 className="text-sm text-gray-400 hover:text-gray-600 transition-colors"

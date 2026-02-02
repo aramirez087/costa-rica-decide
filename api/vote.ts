@@ -104,7 +104,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             });
         }
 
-
         // Get IP address
         const forwardedFor = req.headers['x-forwarded-for'];
         const forwardedForStr = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
@@ -125,21 +124,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         // ==========================================
-        // STRICT RATE LIMITING - 1 vote per IP per day
+        // VOTE UPDATE LOGIC
         // ==========================================
-        const ipKey = `ip:${simpleHash(ip)}`;
-        const ipVoted = await redis.get(ipKey);
+        const voterKey = visitorId ? `voter:${visitorId}` : null;
+        let previousCandidateId = null;
 
-        if (ipVoted && !isTestMode) {
-            console.log(`IP already voted: ${ip}`);
-            return res.status(400).json({
-                error: 'Ya has votado desde esta conexión',
-                alreadyVoted: true
-            });
+        if (voterKey) {
+            previousCandidateId = await redis.get(voterKey) as string | null;
+        }
+
+        // If trying to vote for the same candidate, just return success
+        if (previousCandidateId === candidateId) {
+            return res.status(200).json({ success: true, updated: false, message: 'Ya has votado por este candidato' });
         }
 
         // ==========================================
-        // FINGERPRINT-BASED DEDUPLICATION
+        // STRICT RATE LIMITING - New votes only
+        // ==========================================
+        const ipKey = `ip:${simpleHash(ip)}`;
+
+        // Only check IP limit for NEW voters
+        if (!previousCandidateId && !isTestMode) {
+            const ipVoted = await redis.get(ipKey);
+            if (ipVoted) {
+                console.log(`IP already voted: ${ip}`);
+                return res.status(400).json({
+                    error: 'Ya has votado desde esta conexión',
+                    alreadyVoted: true
+                });
+            }
+        }
+
+        // ==========================================
+        // FINGERPRINT-BASED DEDUPLICATION - New votes only
         // ==========================================
         const identifiers = [
             fingerprint ? `fp:${fingerprint.substring(0, 32)}` : null,
@@ -148,28 +165,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             screenRes && timezone ? `dev:${simpleHash(screenRes + timezone)}` : null,
         ].filter(Boolean) as string[];
 
-        // Check if any identifier already voted
-        for (const id of identifiers) {
-            const voted = await redis.sismember('voters', id);
-            if (voted && !isTestMode) {
-                console.log(`Already voted with: ${id}`);
-                return res.status(400).json({
-                    error: 'Ya has votado',
-                    alreadyVoted: true
-                });
+        if (!previousCandidateId && !isTestMode) {
+            // Check if any identifier already voted
+            for (const id of identifiers) {
+                const voted = await redis.sismember('voters', id);
+                if (voted) {
+                    console.log(`Already voted with: ${id}`);
+                    return res.status(400).json({
+                        error: 'Ya has votado',
+                        alreadyVoted: true
+                    });
+                }
             }
         }
 
         // ==========================================
-        // GLOBAL RATE LIMIT - Max 10 votes per minute total
+        // GLOBAL RATE LIMIT - Relaxed to 10,000 per minute
         // ==========================================
         const globalKey = 'global:votes:minute';
         const globalVotes = await redis.get(globalKey);
 
-        if (globalVotes && Number(globalVotes) >= 10) {
+        if (globalVotes && Number(globalVotes) >= 10000) {
             console.log('Global rate limit exceeded');
             return res.status(429).json({
-                error: 'Demasiados votos, intenta en un minuto',
+                error: 'Demasiado tráfico, intenta en un minuto',
                 alreadyVoted: false
             });
         }
@@ -179,11 +198,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // ==========================================
         const pipeline = redis.pipeline();
 
-        // Increment vote count
-        pipeline.incr(`votes:${candidateId}`);
+        if (previousCandidateId) {
+            // UPDATE: Decrement old, increment new
+            pipeline.decr(`votes:${previousCandidateId}`);
+            pipeline.incr(`votes:${candidateId}`);
+            console.log(`Changing vote from ${previousCandidateId} to ${candidateId}`);
+        } else {
+            // NEW: Just increment new
+            pipeline.incr(`votes:${candidateId}`);
+        }
 
-        // Mark IP as voted (expires in 24 hours)
-        pipeline.set(ipKey, '1', { ex: 86400 });
+        // Save/Update voter record
+        if (voterKey) {
+            pipeline.set(voterKey, candidateId);
+        }
+
+        // Mark IP as voted (expires in 24 hours) - only for new votes
+        if (!previousCandidateId) {
+            pipeline.set(ipKey, '1', { ex: 86400 });
+        }
 
         // Add all identifiers to voters set
         for (const id of identifiers) {
@@ -197,16 +230,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Log vote with timestamp
         pipeline.lpush('vote_log', JSON.stringify({
             candidateId,
+            previousCandidateId,
             ip: simpleHash(ip),
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            isUpdate: !!previousCandidateId
         }));
         pipeline.ltrim('vote_log', 0, 999); // Keep last 1000 votes
 
         const results = await pipeline.exec();
         console.log('Redis pipeline results:', JSON.stringify(results));
 
-        console.log('Vote recorded for:', candidateId);
-        return res.status(200).json({ success: true });
+        console.log('Vote recorded (Update:', !!previousCandidateId, ') for:', candidateId);
+        return res.status(200).json({
+            success: true,
+            updated: !!previousCandidateId
+        });
 
     } catch (error) {
         console.error('Error submitting vote:', error);
