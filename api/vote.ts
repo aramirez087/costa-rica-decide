@@ -93,8 +93,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
 
         const { candidateId, visitorId, fingerprint, timezone, screenRes } = parsedBody || {};
+        const clientPreviousCandidateId = parsedBody?.previousCandidateId;
 
         // Validate candidate
+        // ... (rest of the code update) ...
         if (!candidateId || !VALID_OPTIONS.includes(candidateId)) {
             console.log('Invalid candidate:', { received: candidateId, valid: VALID_OPTIONS });
             return res.status(400).json({
@@ -133,8 +135,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             previousCandidateId = await redis.get(voterKey) as string | null;
         }
 
+        // If Redis doesn't know, but client claims a previous vote, we might trust it later
+        // after verifying the user actually voted (IP/Fingerprint check)
+        const isClientClaimingUpdate = !!clientPreviousCandidateId && !previousCandidateId;
+
         // If trying to vote for the same candidate, just return success
-        if (previousCandidateId === candidateId) {
+        if (previousCandidateId === candidateId || (isClientClaimingUpdate && clientPreviousCandidateId === candidateId)) {
             return res.status(200).json({ success: true, updated: false, message: 'Ya has votado por este candidato' });
         }
 
@@ -147,11 +153,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (!previousCandidateId && !isTestMode) {
             const ipVoted = await redis.get(ipKey);
             if (ipVoted) {
-                console.log(`IP already voted: ${ip}`);
-                return res.status(400).json({
-                    error: 'Ya has votado desde esta conexión',
-                    alreadyVoted: true
-                });
+                // If IP found, but client is claiming update, we'll verify it in the next step (identifiers check)
+                // For now, we don't return error yet if they claim an update
+                if (!isClientClaimingUpdate) {
+                    console.log(`IP already voted: ${ip}`);
+                    return res.status(400).json({
+                        error: 'Ya has votado desde esta conexión',
+                        alreadyVoted: true
+                    });
+                }
             }
         }
 
@@ -167,10 +177,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         if (!previousCandidateId && !isTestMode) {
             // Check if any identifier already voted
+            let foundInVoters = false;
             for (const id of identifiers) {
                 const voted = await redis.sismember('voters', id);
                 if (voted) {
-                    console.log(`Already voted with: ${id}`);
+                    foundInVoters = true;
+                    console.log(`Identifier found in voters: ${id}`);
+                    break;
+                }
+            }
+
+            // If found in voters but we don't have previousCandidateId in Redis,
+            // we check if the client provided a valid hint.
+            if (foundInVoters) {
+                if (isClientClaimingUpdate && VALID_OPTIONS.includes(clientPreviousCandidateId)) {
+                    console.log(`Trusting client hint for update: ${clientPreviousCandidateId}`);
+                    previousCandidateId = clientPreviousCandidateId;
+                } else {
+                    console.log('Already voted and no valid client hint provided');
                     return res.status(400).json({
                         error: 'Ya has votado',
                         alreadyVoted: true

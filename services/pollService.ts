@@ -67,11 +67,13 @@ export const submitVote = async (candidateId: string): Promise<VoteResult> => {
     // Generate voter identifier with fingerprint
     const visitorId = await getVoterIdentifier();
     const fingerprint = await generateFingerprint();
+    const localVote = getCurrentVote();
 
     const payload = {
       candidateId,
       visitorId,
       fingerprint,
+      previousCandidateId: localVote,
       // Send additional verification data
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       language: navigator.language,
